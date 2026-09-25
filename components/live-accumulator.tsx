@@ -1,21 +1,21 @@
 'use client';
 
 /**
- * The real, functional Rise/Fall app (live WebSocket, real auth/trading),
- * rendered via RiseFallView. Optionally takes a no-code `appConfig` to render
+ * The real, functional Accumulators app (live WebSocket, real auth/trading),
+ * rendered via AccumulatorView. Optionally takes a no-code `appConfig` to render
  * the configurable control styles/order. Shared by the deployed page and the
  * editor (/edit) so the editor preview is fully live.
  */
 
 import { useSmartChartsApi } from '@/hooks/use-smartcharts-api';
 import { useSmartChartChartData } from '@/hooks/use-smartchart-chart-data';
-import { useRiseFallTrading } from '../hooks/use-rise-fall-trading';
+import { useAccumulatorTrading } from '../hooks/use-accumulator-trading';
 import { useDerivWSContext } from '@/components/custom/deriv-ws-provider';
 import { useLogoSrc } from '@/components/custom/logo-src-provider';
-import { RiseFallView } from './rise-fall-view';
-import type { RiseFallAppConfig } from '../lib/app-config';
+import { AccumulatorView } from './accumulator-view';
+import type { AccumulatorsAppConfig } from '../lib/app-config';
 
-export function LiveRiseFall({
+export function LiveAccumulator({
   appConfig,
   editMode,
   onSelect,
@@ -26,12 +26,12 @@ export function LiveRiseFall({
   appName,
   showAppName,
 }: {
-  appConfig?: RiseFallAppConfig;
+  appConfig?: AccumulatorsAppConfig;
   editMode?: boolean;
   onSelect?: (key: string) => void;
   selectedKey?: string | null;
   rearrangeMode?: boolean;
-  onReorder?: (order: RiseFallAppConfig['order']) => void;
+  onReorder?: (order: AccumulatorsAppConfig['order']) => void;
   /** Override the provider logo — used by the editor to show the previewed logo. */
   logoSrc?: string;
   appName?: string;
@@ -42,7 +42,7 @@ export function LiveRiseFall({
   const { ws, isConnected, isExhausted, auth } = useDerivWSContext();
   const { authState, accounts, activeAccount, login, signUp, logout, switchAccount } = auth;
 
-  const trading = useRiseFallTrading({
+  const trading = useAccumulatorTrading({
     ws,
     isConnected,
     isExhausted,
@@ -54,7 +54,7 @@ export function LiveRiseFall({
   const { getQuotes, subscribeQuotes, unsubscribeQuotes } = useSmartChartsApi(trading.ws);
 
   return (
-    <RiseFallView
+    <AccumulatorView
       authState={authState}
       accounts={accounts}
       activeAccount={activeAccount}
@@ -65,7 +65,6 @@ export function LiveRiseFall({
       logoSrc={logoSrc}
       appName={appName}
       showAppName={showAppName}
-      ws={trading.ws}
       isConnected={trading.isConnected}
       isLoading={trading.isLoading}
       error={trading.error}
@@ -74,21 +73,13 @@ export function LiveRiseFall({
       selectSymbol={trading.selectSymbol}
       prices={trading.prices}
       pipSize={trading.pipSize}
-      direction={trading.direction}
-      setDirection={trading.setDirection}
-      allowEquals={trading.allowEquals}
-      setAllowEquals={trading.setAllowEquals}
+      growthRate={trading.growthRate}
+      setGrowthRate={trading.setGrowthRate}
+      growthRateOptions={trading.growthRateOptions}
       stake={trading.stake}
       setStake={trading.setStake}
-      duration={trading.duration}
-      setDuration={trading.setDuration}
-      durationOptions={trading.durationOptions}
-      durationUnit={trading.durationUnit}
-      setDurationUnit={trading.setDurationUnit}
-      endDate={trading.endDate}
-      setEndDate={trading.setEndDate}
-      endTime={trading.endTime}
-      setEndTime={trading.setEndTime}
+      takeProfit={trading.takeProfit}
+      setTakeProfit={trading.setTakeProfit}
       proposal={trading.proposal}
       buyContract={trading.buyContract}
       isBuying={trading.isBuying}
