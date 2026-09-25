@@ -1,114 +1,76 @@
 'use client';
 
-import { useEffect } from 'react';
-import { toast } from 'sonner';
+import { useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { Localize } from '@deriv-com/translations';
+import { useAppTranslations } from '@/components/custom/i18n-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { useAppTranslations } from '@/components/custom/i18n-provider';
-import type {
-  ContractMode,
-  TradeType,
-  DurationLimits,
-  ProposalInfo,
-  BuyResult,
-} from '../lib/types';
+import { EndTimePicker } from '@/components/custom/end-time-picker';
+import type { DerivWS, ActiveSymbol, ProposalInfo, BuyResult } from '@deriv/core';
+import type { Direction, DurationSelectUnit, DurationOption } from '../lib/types';
 
 interface TradeControlsProps {
-  tradeType: TradeType;
-  contractMode: ContractMode;
-  onContractModeChange: (mode: ContractMode) => void;
-  selectedDigit: number;
+  direction: Direction;
+  onDirectionChange: (direction: Direction) => void;
+  allowEquals: boolean;
+  onAllowEqualsChange: (value: boolean) => void;
   isConnected: boolean;
   stake: string;
   onStakeChange: (value: string) => void;
   duration: number;
   onDurationChange: (value: number) => void;
-  durationLimits: DurationLimits;
+  durationOptions: DurationOption[];
+  durationUnit: DurationSelectUnit;
+  onDurationUnitChange: (unit: DurationSelectUnit) => void;
+  endDate: Date | undefined;
+  onEndDateChange: (date: Date | undefined) => void;
+  endTime: string;
+  onEndTimeChange: (time: string) => void;
+  ws: DerivWS | null;
+  activeSymbol: ActiveSymbol | null;
   proposal: ProposalInfo | null;
-  isProposalLoading: boolean;
+
   onBuy: () => void;
   isBuying: boolean;
   buyResult: BuyResult | null;
   buyError: string | null;
   onClearBuyResult: () => void;
+  /** Whether the user is authenticated — shows the View your positions link when true. */
   isAuthenticated?: boolean;
-  /**
-   * Pins the Buy button above the footer (fixed) instead of inline. Driven by
-   * the same useIsMobile state that picks the view's layout branch — a CSS
-   * breakpoint here could disagree with the mounted branch during the
-   * first-paint window, where useIsMobile is still false on every viewport.
-   */
-  isMobile?: boolean;
-}
-
-function getContractModeOptions(
-  localize: (text: string) => string
-): Record<TradeType, { value: ContractMode; label: string }[]> {
-  return {
-    'matches-differs': [
-      { value: 'DIGITMATCH', label: localize('Matches') },
-      { value: 'DIGITDIFF', label: localize('Differs') },
-    ],
-    'over-under': [
-      { value: 'DIGITOVER', label: localize('Over') },
-      { value: 'DIGITUNDER', label: localize('Under') },
-    ],
-    'even-odd': [
-      { value: 'DIGITEVEN', label: localize('Even') },
-      { value: 'DIGITODD', label: localize('Odd') },
-    ],
-  };
-}
-
-function getPredictionText(
-  contractMode: ContractMode,
-  localize: (text: string) => string
-): string {
-  switch (contractMode) {
-    case 'DIGITMATCH':
-      return localize('match');
-    case 'DIGITDIFF':
-      return localize('differ from');
-    case 'DIGITOVER':
-      return localize('be over');
-    case 'DIGITUNDER':
-      return localize('be under');
-    case 'DIGITEVEN':
-      return localize('be even');
-    case 'DIGITODD':
-      return localize('be odd');
-  }
-}
-
-function showDigitInPrediction(contractMode: ContractMode): boolean {
-  return contractMode !== 'DIGITEVEN' && contractMode !== 'DIGITODD';
 }
 
 export function TradeControls({
-  tradeType,
-  contractMode,
-  onContractModeChange,
-  selectedDigit,
+  direction,
+  onDirectionChange,
+  allowEquals,
+  onAllowEqualsChange,
   isConnected,
   stake,
   onStakeChange,
   duration,
   onDurationChange,
-  durationLimits,
+  durationOptions,
+  durationUnit,
+  onDurationUnitChange,
+  endDate,
+  onEndDateChange,
+  endTime,
+  onEndTimeChange,
+  ws,
+  activeSymbol,
   proposal,
-  isProposalLoading,
   onBuy,
   isBuying,
   buyResult,
   buyError,
   onClearBuyResult,
   isAuthenticated,
-  isMobile,
 }: TradeControlsProps) {
   const { localize } = useAppTranslations();
 
@@ -123,9 +85,9 @@ export function TradeControls({
     if (buyResult) {
       toast.success(localize('Contract Purchased'), {
         description: localize(
-          'Buy price: {{buyPrice}} USD | Payout: {{payout}} USD | Balance: {{balance}} USD',
+          'Buy price: {{buy_price}} USD | Payout: {{payout}} USD | Balance: {{balance}} USD',
           {
-            buyPrice: buyResult.buyPrice.toFixed(2),
+            buy_price: buyResult.buyPrice.toFixed(2),
             payout: buyResult.payout.toFixed(2),
             balance: buyResult.balanceAfter.toFixed(2),
           }
@@ -135,126 +97,160 @@ export function TradeControls({
     }
   }, [buyResult, onClearBuyResult, localize]);
 
-  const modeOptions = getContractModeOptions(localize)[tradeType];
+  const activeOption = durationOptions.find(o => o.unit === durationUnit);
+
+  const endTimeOption = durationOptions.find(o => o.unit === 'end-time');
+  const { endTimeMinDate, endTimeMaxDate } = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return {
+      endTimeMinDate: today,
+      endTimeMaxDate: endTimeOption
+        ? new Date(today.getTime() + endTimeOption.max * 86400000)
+        : new Date(today.getTime() + 365 * 86400000),
+    };
+  }, [endTimeOption]);
 
   return (
-    <div className="space-y-2 sm:space-y-4">
+    <div className="w-full space-y-2 lg:max-w-[400px] lg:space-y-4">
+      {/* Rise / Fall direction segmented control */}
       <ToggleGroup
         type="single"
-        value={contractMode}
-        onValueChange={value => {
-          if (value) onContractModeChange(value as ContractMode);
+        value={direction}
+        onValueChange={(value) => {
+          if (value === 'CALL' || value === 'PUT') onDirectionChange(value);
         }}
         className="w-full gap-0 rounded-full bg-muted p-1"
       >
-        {modeOptions.map(opt => (
-          <ToggleGroupItem
-            key={opt.value}
-            value={opt.value}
-            className="flex-1 rounded-full text-sm font-medium text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-primary data-[state=on]:font-bold data-[state=on]:shadow-sm hover:text-foreground"
-          >
-            {opt.label}
-          </ToggleGroupItem>
-        ))}
+        <ToggleGroupItem
+          value="CALL"
+          className="flex-1 rounded-full text-sm font-medium text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-green-600 data-[state=on]:font-bold data-[state=on]:shadow-sm hover:text-foreground"
+        >
+          <Localize i18n_default_text="Rise" />
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value="PUT"
+          className="flex-1 rounded-full text-sm font-medium text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-destructive data-[state=on]:font-bold data-[state=on]:shadow-sm hover:text-foreground"
+        >
+          <Localize i18n_default_text="Fall" />
+        </ToggleGroupItem>
       </ToggleGroup>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="stake" className="text-xs text-muted-foreground">
-            <Localize i18n_default_text="Stake" />
-          </Label>
+      {/* Allow equals */}
+      <div className="flex items-center justify-between">
+        <Label htmlFor="allow-equals" className="text-sm cursor-pointer">
+          <Localize i18n_default_text="Allow equals" />
+        </Label>
+        <Switch
+          id="allow-equals"
+          checked={allowEquals}
+          onCheckedChange={onAllowEqualsChange}
+        />
+      </div>
+
+      {/* Stake */}
+      <div className="space-y-1.5">
+        <Label htmlFor="stake" className="text-xs text-muted-foreground">
+          <Localize i18n_default_text="Stake" />
+        </Label>
+        <Input
+          id="stake"
+          type="number"
+          value={stake}
+          onChange={(e) => onStakeChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
+          }}
+          min={0}
+          step="0.01"
+          labelRight="USD"
+        />
+      </div>
+
+      {/* Duration */}
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">
+          <Localize i18n_default_text="Duration" />
+        </Label>
+        <Select
+          value={durationUnit}
+          onValueChange={(v) => {
+            const opt = durationOptions.find(o => o.unit === v);
+            if (opt) onDurationUnitChange(opt.unit);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {durationOptions.map(opt => (
+              <SelectItem key={opt.unit} value={opt.unit}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {durationUnit !== 'end-time' && (
           <Input
-            id="stake"
-            type="number"
-            value={stake}
-            onChange={e => onStakeChange(e.target.value)}
-            onKeyDown={e => {
-              if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
-            }}
-            min={0}
-            step="0.01"
-            labelRight="USD"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="duration" className="text-xs text-muted-foreground">
-            <Localize i18n_default_text="Duration" />
-          </Label>
-          <Input
-            id="duration"
             type="number"
             value={duration}
-            onChange={e => {
+            onChange={(e) => {
               const val = parseInt(e.target.value, 10);
               if (!isNaN(val)) onDurationChange(val);
             }}
-            min={durationLimits.min}
-            max={durationLimits.max}
+            min={activeOption?.min}
+            max={activeOption?.max}
             step={1}
-            labelRight={localize('Ticks')}
           />
-        </div>
-      </div>
+        )}
 
-      <div className="rounded-lg border border-border p-2 sm:p-3 bg-muted/20 space-y-1.5 sm:space-y-2">
-        <p className="text-[11px] sm:text-xs text-muted-foreground mb-0 sm:mb-1">
-          <Localize i18n_default_text="Prediction" />
-        </p>
-        <p className="text-xs sm:text-sm font-medium">
-          <Localize i18n_default_text="Last digit of the price will" />{' '}
-          <span className="text-primary font-bold">
-            {getPredictionText(contractMode, localize)}
-          </span>
-          {showDigitInPrediction(contractMode) && (
-            <>
-              {' '}
-              <span className="inline-flex w-5 h-5 rounded-full bg-primary text-primary-foreground items-center justify-center text-xs font-bold">
-                {selectedDigit}
-              </span>
-            </>
-          )}
-        </p>
-        {(proposal || isProposalLoading) && (
-          <div className="flex items-center justify-between pt-1 border-t border-border">
-            <span className="text-xs text-muted-foreground">
-              <Localize i18n_default_text="Payout" />
-            </span>
-            {isProposalLoading ? (
-              <Skeleton className="h-4 w-24" />
-            ) : (
-              <span className="text-sm font-bold text-foreground">
-                {proposal!.payout.toFixed(2)} USD
-              </span>
-            )}
-          </div>
+        {durationUnit === 'end-time' && (
+          <EndTimePicker
+            ws={ws}
+            isConnected={isConnected}
+            activeSymbol={activeSymbol}
+            endDate={endDate}
+            onEndDateChange={onEndDateChange}
+            endTime={endTime}
+            onEndTimeChange={onEndTimeChange}
+            minDate={endTimeMinDate}
+            maxDate={endTimeMaxDate}
+          />
         )}
       </div>
 
-      {/* Buy button — fixed above footer on mobile, inline on desktop */}
-      <div
-        className={
-          isMobile
-            ? 'fixed bottom-[calc(env(safe-area-inset-bottom)+2.5rem)] left-3 right-3'
-            : undefined
-        }
-      >
+      {/* Buy button — inline on desktop, fixed above footer on mobile */}
+      <div className="max-lg:fixed max-lg:bottom-[calc(env(safe-area-inset-bottom)+2.5rem)] max-lg:left-3 max-lg:right-3 lg:static">
         <Button
-          className="w-full h-10 rounded-full px-6 sm:h-11 sm:px-8"
+          className="w-full rounded-full bg-primary hover:bg-primary/90 text-primary-foreground"
+          size="lg"
           disabled={!isConnected || !proposal || isBuying}
           onClick={onBuy}
         >
-          {isBuying
-            ? localize('Purchasing...')
-            : proposal
-              ? localize('Buy @ {{price}} USD', {
-                  price: proposal.askPrice.toFixed(2),
-                })
-              : localize('Buy Contract')}
+          {isBuying ? (
+            <Localize i18n_default_text="Purchasing..." />
+          ) : (
+            <span className="flex flex-col items-center leading-tight gap-0.5">
+              <span><Localize i18n_default_text="Buy" /></span>
+              {proposal && (
+                <span className="text-xs font-normal opacity-90">
+                  <Localize
+                    i18n_default_text="Payout {{payout}} USD"
+                    values={{ payout: proposal.payout.toFixed(2) }}
+                  />
+                </span>
+              )}
+            </span>
+          )}
         </Button>
       </div>
 
+      {/* View your positions — shown when authenticated */}
       {isAuthenticated && (
-        <Button asChild variant="ghost" className="w-full text-sm text-muted-foreground hover:text-foreground">
+        <Button
+          asChild
+          variant="ghost"
+          className="w-full text-sm text-muted-foreground hover:text-foreground"
+        >
           <Link href="/reports">
             <Localize i18n_default_text="View your positions →" />
           </Link>
